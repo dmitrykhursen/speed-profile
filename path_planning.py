@@ -5,6 +5,25 @@ import matplotlib.pyplot as plt
 
 from scipy.interpolate import UnivariateSpline
 
+# Describe algorithm:
+# 1) if len(B) == 0 or len(Y) == 0: B, Y = self.fill_missing_cones(B, Y)
+# 2) sort cones (nearest cone-> nearest cone-> nearest cone)
+# 3) filter cones
+# 4) while loop:
+# 5)            if step > 1:
+# 6)                find_line_parameters
+# 7)                B_hat, Y_hat = points_above_the_cones_line(B), points_above_the_cones_line(Y)   and points_above_the normal_line (if len == 0)
+# 8)                if len(B_hat) == 0 and len(Y_hat) > 0: return
+
+# 9)            else (step == 1): B_hat, Y_hat = B, Y
+# 10)           b, y = find_blue_and_yellow_cone
+# 11)           if self.is_already_added(b) and self.is_already_added(y): stop!
+# 12)           append b and y to sorted_blue/yellow_cones
+# 13)           center = calculate_center(b, y)
+# 14)           check path distance
+# 15)           check if the new center is ok (angle check)
+# 16)           append center
+# 17)           step += 1
 
 class PathPlanning:
 
@@ -37,7 +56,7 @@ class PathPlanning:
 
             return sorted_points
     
-    def sort_cones(self, cones, blue):
+    def sort_cones(self, cones):
         # sort cones in a right sequence
 
         sorted_cones = []         
@@ -48,14 +67,6 @@ class PathPlanning:
             closest_cone = cones[0]
             cones = np.delete(cones, 0, axis=0)
 
-            # ??? do not understand
-            # if blue and len(self.sorted_blue_cones) > 0 \
-            #     and np.linalg.norm(self.sorted_blue_cones[0]) > np.linalg.norm(closest_cone):
-            #         continue
-            # elif not blue and len(self.sorted_yellow_cones) > 0 \
-            #     and np.linalg.norm(self.sorted_yellow_cones[0]) > np.linalg.norm(closest_cone):
-            #         continue
-
             sorted_cones.append(closest_cone)
             start = closest_cone
 
@@ -65,9 +76,7 @@ class PathPlanning:
         # filter cones accordnig to the rules:
         # 1. the distance between blue or yellow cones is up to 6m
 
-        # REDO? filter only by max distance? max 20m?; between same cones - distance is up to 6m
-        # TODO: set min dist 1m?
-        # optimize the func using numpy arr operations
+        # TODO: optimize the func using numpy arr operations
 
         def compute_distances_between_cones(cones):
             distances = [np.linalg.norm(cones[0])] # add the distance from start (0,0) to the first cone
@@ -81,17 +90,19 @@ class PathPlanning:
 
         filtered_cones = []
 
-        min_dist = 1. #0.5
+        # min_dist = 0.5 # do we need this constraint?
         max_dist = 6.
+
+        max_dist_for_first_cone = 8. # 9.
 
         print("distances:")
         print(distances)
 
         for i in range(len(distances)):
-            if distances[i] >= min_dist and distances[i] <= max_dist:
+            if distances[i] <= max_dist:
                 filtered_cones.append(cones[i])
-            elif i == 0 and distances[i] <= 8:  # is the condition for the first cones needed?
-                    filtered_cones.append(cones[i])
+            elif i == 0 and distances[i] <= max_dist_for_first_cone:  # is the condition for the first cones needed?
+                    filtered_cones.append(cones[0])
             else:
                 break
                 
@@ -99,9 +110,7 @@ class PathPlanning:
 
     def find_line_parameters(self, pointB, pointY):
         if pointB[0]-pointY[0] != 0:
-            k = (pointB[1]-pointY[1])/(pointB[0]-pointY[0]) # old version x vs y .....
-            # k = (pointB[0]-pointY[0])/(pointB[1]-pointY[1])
-
+            k = (pointB[1]-pointY[1])/(pointB[0]-pointY[0])
         else:
             k = self.k
 
@@ -114,56 +123,66 @@ class PathPlanning:
         #     self.cs.append(self.c)
     
 
-    def points_above_the_line(self, points):
+    def points_above_the_cones_line(self, points):
         points = np.array([p for p in points if not self.is_already_added(p)]) # filter used points
         if len(points) == 0:
             return np.array([])
         else:   
             return points[np.sign((points[:, 1] - self.k * points[:, 0] - self.c)) == np.sign(self.sorted_yellow_cones[-1][0]-self.sorted_blue_cones[-1][0])]
+    
+    def points_above_the_normal_line(self, pointB, pointY, points):
+        k = (pointB[1] - pointY[1]) / (pointB[0] - pointY[0])
+        k = -1 / k
+        c = pointB[1] - k * pointB[0]
+
+        if len(points) == 0:
+            return np.array([])
+        else:   
+            # print('!!!!!!!!!!!!!!!!!! HERE')
+            # print("k: ", k, " c: ", c)
+            # print(points)
+            # print(points[:, 1] - k * points[:, 0] - c)
+            # print(np.sign((points[:, 1] - k * points[:, 0] - c)))
+            # print(pointB[1] - pointY[1])
+            # print(np.sign(pointB[1] - pointY[1]))
+            # print("!!! END ---")
+            return points[np.sign((points[:, 1] - k * points[:, 0] - c)) == np.sign(pointB[1] - pointY[1])]
+        
 
     def find_blue_and_yellow_cone(self, B_points, Y_points, step):
-        sorted_B_points = self.sort_points(B_points, self.start_points[-1])
+        sorted_B_points = self.sort_points(B_points, self.start_points[-1]) # is neccessary to sort here?
         sorted_Y_points = self.sort_points(Y_points, self.start_points[-1])
         # print("B_sorted: ", sorted_B_points)
         # print("Y_sorted: ", sorted_Y_points)
 
-        ###
-        if len(sorted_Y_points) == 0 and len(sorted_B_points) == 0:
-            return None, None
-
-        if len(sorted_Y_points) == 0:
-            # instead of fill missing
-            if len(self.sorted_yellow_cones) == 0:
-                return None, None
-
-            b = sorted_B_points[0]
-            y = self.sorted_yellow_cones[-1]
-            return b, y
-
-        if len(sorted_B_points) == 0:
-            if len(self.sorted_blue_cones) == 0:
-                return None, None
-
-            b = self.sorted_blue_cones[-1]
-            y = sorted_Y_points[0]
-            return b, y
+        # sorted_B_points = B_points
+        # sorted_Y_points = Y_points
 
         if step == 1:
             b = sorted_B_points[0]
             y = sorted_Y_points[0]
-            # self.check_cones_side(b, y)
             return b, y
         
         dist_to_blue_cone = np.linalg.norm(sorted_B_points[0] - self.start_points[-1])
         dist_to_yellow_cone = np.linalg.norm(sorted_Y_points[0] - self.start_points[-1])
+        # print("sorted_B: ", sorted_B_points[0])
+        # print("sorted_Y: ", sorted_Y_points[0])
         # print("dist to blue: ", dist_to_blue_cone, " dist to yellow: ", dist_to_yellow_cone)
 
         if dist_to_blue_cone < dist_to_yellow_cone:
             b = sorted_B_points[0]
             y = self.sorted_yellow_cones[-1]
+            # new condition for last cones (connects with normal line)
+            if self.is_already_added(b) and self.is_already_added(y):
+                b = self.sorted_blue_cones[-1]
+                y = sorted_Y_points[0]
         else:
             b = self.sorted_blue_cones[-1]
             y = sorted_Y_points[0]
+            # new condition for last cones (connects with normal line)
+            if self.is_already_added(b) and self.is_already_added(y):
+                b = sorted_B_points[0]
+                y = self.sorted_yellow_cones[-1]
 
         return b, y
     
@@ -224,6 +243,61 @@ class PathPlanning:
         angle = np.arccos(dot_product)  # angle in radians
 
         return angle
+
+    def fill_missing_cones(self, B, Y):
+        yellow = True if len(Y) > len(B) else False
+        if yellow:
+            B = self.sort_cones(B)
+            to_fill = B
+            full = Y
+        else:
+            Y = self.sort_cones(Y)
+            to_fill = Y
+            full = B
+        if len(to_fill) == 0:
+            to_fill = to_fill.reshape(-1, full.shape[1])
+
+        for idx in range(len(to_fill), len(full)):
+            if idx == 0:
+                vec = full[1, :] - full[0, :]
+                vec = vec / np.linalg.norm(vec)
+                if not yellow:
+                    vec = np.matmul(np.array([[0, -1], [1, 0]]), vec)
+                else:
+                    vec = np.matmul(np.array([[0, 1], [-1, 0]]), vec)
+            elif idx == len(full) - 1:
+                vec = full[-1, :] - full[-2, :]
+                vec = vec / np.linalg.norm(vec)
+                if not yellow:
+                    vec = np.matmul(np.array([[0, -1], [1, 0]]), vec)
+                else:
+                    vec = np.matmul(np.array([[0, 1], [-1, 0]]), vec)
+            else:
+                vec1 = full[idx - 1, :] - full[idx, :]
+                vec2 = full[idx + 1, :] - full[idx, :]
+                vec1 = vec1 / np.linalg.norm(vec1)
+                vec2 = vec2 / np.linalg.norm(vec2)
+                angle = np.arccos(np.dot(vec1, vec2)) / 2
+                
+                # before was if yellow
+                if not yellow:
+                    vec = np.matmul(np.array(
+                        [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]), vec2)
+                else:
+                    vec = np.matmul(
+                        np.array([[np.cos(-angle), -np.sin(-angle)],
+                                 [np.sin(-angle), np.cos(-angle)]]), vec2
+                    )
+
+            to_fill = np.vstack(
+                (to_fill, full[idx, :] + vec * self.filling_cones_distance))
+        # print("To fill, full:")
+        # print(to_fill, full)
+        if yellow:
+            return to_fill, full
+        else:
+            return full, to_fill
+    
     
     def find_path(self, B, Y, n_steps=0, verbose=False):
 
@@ -237,20 +311,19 @@ class PathPlanning:
             print("raw B,Y:")
             print(B)
             print(Y)
+        
+        # fill missing cones
+        if len(B) == 0 or len(Y) == 0:
+            B, Y = self.fill_missing_cones(B, Y)
 
         step = 1
-        B = self.sort_cones(B, True)
-        Y = self.sort_cones(Y, False)
-
-        # raw_B = np.copy(B)
-        # raw_Y = np.copy(Y)
+        B = self.sort_cones(B)
+        Y = self.sort_cones(Y)
 
         if verbose:
             print("sorted B,Y:")
             print(B)
             print(Y)
-
-        # print(self.blue_distance, self.yellow_distance)
 
         if len(B) != 0:    
             B = self.filter_cones(B)
@@ -279,72 +352,26 @@ class PathPlanning:
             if step != 1:
                 self.find_line_parameters(self.sorted_blue_cones[-1], self.sorted_yellow_cones[-1])
                 
-                B_hat = self.points_above_the_line(B)
-                Y_hat = self.points_above_the_line(Y)
+                B_hat = self.points_above_the_cones_line(B)
+                Y_hat = self.points_above_the_cones_line(Y)
+
+                if len(B_hat) == 0:
+                    B_hat = self.points_above_the_normal_line(self.start_points[-1], self.start_points[-2], B)
                 
-                # if len(B_hat) == 0 and len(Y_hat) == 0: #old
+                if len(Y_hat) == 0:
+                    Y_hat = self.points_above_the_normal_line(self.start_points[-1], self.start_points[-2], Y)
+
+
                 if len(B_hat) == 0 or len(Y_hat) == 0:
                     if verbose:
-                        print("Path algorithm was stopped: B_hat.size == 0 and Y_hat.size == 0")
+                        print("Path algorithm was stopped: B_hat.size == 0 or Y_hat.size == 0")
                     
                     return self.return_stack(object_name="centers")
-                    # break
-
-                # if len(B_hat) == 0:
-
-            #         # print("B_hat is empty")
-                    
-            #         if len(Y_hat) > 1:
-            #             if len(Y_hat) > 2: # ? > 1
-            #                 full_Y = Y_hat[0:3, :]
-            #             else:
-            #                 full_Y = Y_hat
-
-            #             B_hat, _ = self.fill_missing(B_hat, full_Y)
-
-            #             for b_c in B_hat:
-            #                 self.artificial_cones.append(b_c)
-                        
-            #             # B = np.vstack((B, B_hat))
-            #             if len(raw_B) == 0:
-            #                 raw_B = raw_B.reshape(-1,Y_hat.shape[1])
-            #             B = np.vstack((raw_B, B_hat))
-
-            #             B = self.sort_cones(B, True)
-            #             B = self.filter_cones(B, self.blue_distance)
-            #             B_hat = self.points_above_the_line(B) # recalculate because some artificial points can be placed before than already used points
-
-            #             # for b_c in B_hat:
-            #             #     if np.all(np.isin(b_c, B)):
-            #             #         self.artificial_cones.append(b_c)
-
-            #     elif len(Y_hat) == 0: 
-            #         # print("Y_hat is empty")
-
-            #         if len(B_hat) > 1:
-            #             if len(B_hat) > 2: # ? > 1
-            #                 full_B = B_hat[0:3, :]
-            #             else:
-            #                 full_B = B_hat
-            #             _, Y_hat = self.fill_missing(full_B, Y_hat)
-
-            #             for y_c in Y_hat:
-            #                 self.artificial_cones.append(y_c)
-                            
-            #             # Y = np.vstack((Y, Y_hat))
-                        
-            #             if len(raw_Y) == 0:
-            #                 raw_Y = raw_Y.reshape(-1,Y_hat.shape[1])
-            #             Y = np.vstack((raw_Y, Y_hat))
-
-            #             Y = self.sort_cones(Y, False)
-            #             Y = self.filter_cones(Y, self.yellow_distance)
-            #             Y_hat = self.points_above_the_line(Y)
-
+            
             else:
+                # for step == 1
                 B_hat = B
                 Y_hat = Y
-
 
             if verbose:
                 print(B_hat)
@@ -354,11 +381,6 @@ class PathPlanning:
 
             if verbose:
                 print("decided: b: ",b," y: ",y)
-                
-            if b is None or y is None:
-                if verbose:
-                    print("Path algorithm was stopped: b_cone or y_cone is None")
-                break
 
             if self.is_already_added(b) and self.is_already_added(y):
                 if verbose:
@@ -373,30 +395,33 @@ class PathPlanning:
             center = self.calculate_center(b, y)   
 
             dist_to_next_center = np.linalg.norm(center - self.start_points[-1])
-            # if np.linalg.norm(center - self.start_points[0]) > 20: 
-            if self.path_distance + dist_to_next_center > 20: 
-                # the planned path is far long
+            if self.path_distance + dist_to_next_center > 20.: 
+                # the planned path is so long
                 if verbose:
-                    print("The path is planned far enough")
+                    print("The path is planned far long")
                 break
 
-            if len(self.start_points) > 3 and not self.is_new_center_ok(center): # > 3 is better but > 2 is "smarter"
-                # heading vector wants to go backwards
-                if verbose:
-                    print("The wrong place of a new center")
-                break
+            # if len(self.start_points) > 3 and not self.is_new_center_ok(center): # > 3 is better but > 2 is "smarter"
+            #     # heading vector wants to go backwards
+            #     if verbose:
+            #         print("The wrong place of a new center")
+            #     break
 
 
             self.start_points.append(center)
 
-            dist_between_b_and_y = np.linalg.norm(b-y)
-            self.distances_between_b_and_y.append(dist_between_b_and_y)
+            # dist_between_b_and_y = np.linalg.norm(b-y)
+            # self.distances_between_b_and_y.append(dist_between_b_and_y)
+
             self.path_distance += dist_to_next_center
-            if verbose:
-                print("b_cone: ", b, " y_cone: ",y, " center: ",center, " path distance: ", self.path_distance, " dist between b and y: ", dist_between_b_and_y)
+
+            # if verbose:
+            #     print("b_cone: ", b, " y_cone: ",y, " center: ",center, " path distance: ", self.path_distance, " dist between b and y: ", dist_between_b_and_y)
+
             if verbose:
                 print("Step ", step, " done!")
                 print()
+                
             step += 1
 
         return self.return_stack(object_name="centers")
@@ -405,13 +430,15 @@ class PathPlanning:
         print("here ---")
         print(path)
 
-        if len(path) < 4:
+        spline_deg = 3
+
+        if len(path) < spline_deg+1:
             return path
 
         x = path[:,0] 
         y = path[:,1]
 
-        spl = UnivariateSpline(x, y)
+        spl = UnivariateSpline(x, y, k=spline_deg)
 
         new_y = np.array(spl.__call__(x))
         print("new y:")
@@ -501,25 +528,25 @@ if __name__ == '__main__':
             tmp = Y_cones[:,0].copy()
             Y_cones[:,0], Y_cones[:,1] = Y_cones[:,1], tmp
 
+            # B_cones = np.array([]) # for testing fill_cones
             print(B_cones)
             print(Y_cones)
-
-
-
 
             # is it beeter to work with y as a go forward axis or x is a forward axis??? 
 
             path_planner = PathPlanning()
+            # path = path_planner.find_path(B_cones, Y_cones, verbose=True)
             path = path_planner.find_path(B_cones, Y_cones, verbose=True)
+
+            path = path_planner.smooth_the_path(path)
             print(path)
 
             # path = np.array([[0., 0.]])
             b_boundaries = path_planner.return_stack("blue cones")
             y_boundaries = path_planner.return_stack("yellow cones")
-            # plot_results(B_cones, Y_cones, path, b_boundaries, y_boundaries)
+            plot_results(B_cones, Y_cones, path, b_boundaries, y_boundaries)
 
-            new_path = path_planner.smooth_the_path(path)
-            plot_results(B_cones, Y_cones, new_path, b_boundaries, y_boundaries)
+            # new_path = path_planner.smooth_the_path(path)
+            # plot_results(B_cones, Y_cones, new_path, b_boundaries, y_boundaries)
 
-            # break
 
